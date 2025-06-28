@@ -10,23 +10,7 @@ async function bootstrap() {
   });
 
 
-  app.enableCors({
-    origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-
-    const allowedOrigins = [
-      "*"
-    ];
-
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    credentials: true
-  });
+  app.enableCors();
 
   const config = new DocumentBuilder()
     .setTitle('Documentação de Rotas do PortalWEPGCOMP')
@@ -50,11 +34,6 @@ async function bootstrap() {
     ],
   });
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true,
-    }),
-  );
   app.useGlobalFilters(new HttpExceptionFilter());
 
   await app.listen(process.env.PORT ?? 3000);
