@@ -15,7 +15,7 @@ async function bootstrap() {
     if (!origin) return callback(null, true);
 
     const allowedOrigins = [
-      process.env.FRONTEND_URL
+      "*"
     ];
 
     if (allowedOrigins.includes(origin)) {
