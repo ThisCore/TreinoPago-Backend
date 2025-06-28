@@ -1,21 +1,79 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
-import { Client, PaymentStatus } from '@prisma/client';
+import { Client, PaymentStatus, SystemConfig } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { EmailService } from 'src/email/email.service';
 
 @Injectable()
 export class ClientService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private emailService: EmailService) {}
 
   async create(data: CreateClientDto): Promise<Client> {
-    return this.prisma.client.create({
-      data,
-      include: {
-        plan: true,
-        charges: true,
-      },
+
+    const systemConfig: SystemConfig | null = await this.prisma.systemConfig.findUnique({
+      where: { id: 'singleton' },
     });
+
+    if (!systemConfig?.pixKey) {
+      throw new BadRequestException('Chave PIX não configurada no sistema.');
+    }
+
+    const plan = await this.prisma.plan.findUnique({
+      where: {id: data.planId }
+    })
+
+    if (!plan) {
+      throw new BadRequestException('Plano selecionado não foi encontrado no sistema.');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const client = await tx.client.create({
+        data,
+        include: {
+          plan: true,
+          charges: true,
+        },
+      });
+
+      const firstCharge = await tx.charge.create({
+        data: {
+          amount: client.plan.price,
+          dueDate: client.billingStartDate,
+          clientId: client.id,
+          reminderSent: false,
+          status: PaymentStatus.PENDING,
+        },
+      });
+
+      return { client, firstCharge };
+    });
+
+    const welcomeEmailData = {
+      to: result.client.email,
+      subject: "Mensagem de boas vindas!",
+      clientName: result.client.name,
+      planName: result.client.plan.name,
+      planPrice: result.client.plan.price,
+      recurrence: result.client.plan.recurrence,
+      pixKey: systemConfig.pixKey,
+      billingStartDate: result.client.billingStartDate,
+    }
+
+    try {
+      await this.emailService.sendWelcomeEmail(welcomeEmailData)
+    } catch (e) {
+      console.log("erro no envio do email de boas vindas: ", e)
+    }
+
+      return {
+              id: result.client.id,
+              name: result.client.name,
+              email: result.client.email,
+              paymentStatus: result.client.paymentStatus,
+              billingStartDate: result.client.billingStartDate,
+              planId: result.client.planId,
+      } as Client;
   }
 
   async findAll(): Promise<Client[]> {

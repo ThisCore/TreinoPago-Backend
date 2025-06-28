@@ -1,8 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { HttpExceptionFilter } from './exceptions/filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { PaymentRecurrenceService } from './payment/payment.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -36,6 +37,24 @@ async function bootstrap() {
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  await checkPendingPayments(app);
+
   await app.listen(process.env.PORT ?? 3000);
 }
+
+async function checkPendingPayments(app: INestApplication) {
+  try {
+    console.log('🔍 Verificando pagamentos pendentes...');
+    
+    const paymentService = app.get(PaymentRecurrenceService);
+    
+    await paymentService.processPaymentsManually();
+    
+    console.log('✅ Verificação de pagamentos concluída');
+  } catch (error) {
+    console.error('⚠️ Erro na verificação de pagamentos (continuando inicialização):', error);
+  }
+}
+
+
 bootstrap();

@@ -33,9 +33,6 @@ export class EmailService {
     this.initializeTransporter();
   }
 
-  /**
-   * Inicializa o transporter do Nodemailer
-   */
   private initializeTransporter(): void {
     const emailProvider = this.configService.get<string>('EMAIL_PROVIDER', 'gmail');
     
@@ -48,7 +45,6 @@ export class EmailService {
         },
       });
     } else if (emailProvider === 'smtp') {
-      // Configuração SMTP genérica
       this.transporter = nodemailer.createTransport({
         host: this.configService.get<string>('SMTP_HOST'),
         port: this.configService.get<number>('SMTP_PORT', 587),
@@ -59,7 +55,6 @@ export class EmailService {
         },
       });
     } else if (emailProvider === 'sendgrid') {
-      // Configuração para SendGrid
       this.transporter = nodemailer.createTransport({
         service: 'SendGrid',
         auth: {
