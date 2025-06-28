@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Recurrence {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  SEMIANNUAL
+  ANNUAL
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  CANCELED
+}
+
+model Plan {
+  id         String      @id @default(uuid())
+  name       String
+  price      Float
+  recurrence Recurrence
+
+  clients    Client[]
+}
+
+model Client {
+  id                String        @id @default(uuid())
+  name              String
+  email             String        @unique
+  paymentStatus     PaymentStatus
+  billingStartDate  DateTime
+  planId            String
+
+  plan              Plan          @relation(fields: [planId], references: [id])
+  charges           Charge[]
+}
+
+model Charge {
+  id           String        @id @default(uuid())
+  clientId     String
+  dueDate      DateTime
+  amount       Float
+  status       PaymentStatus
+  reminderSent Boolean       @default(false)
+
+  client       Client        @relation(fields: [clientId], references: [id])
+}
+
+model SystemConfig {
+  id      String @id @default("singleton")
+  pixKey  String
+}
