@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SystemConfig } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-
-export interface UpdateSystemConfigDto {
-  pixKey: string;
-}
+import { UpdateSystemConfigDto } from './dto/update-system-config.dto';
 
 @Injectable()
 export class SystemConfigService {
@@ -27,8 +24,8 @@ export class SystemConfigService {
     return config;
   }
 
-  async updateConfig(data: UpdateSystemConfigDto): Promise<SystemConfig> {
-    return this.prisma.systemConfig.upsert({
+  async updateConfig(data: UpdateSystemConfigDto): Promise<String> {
+    const systemConfig = await this.prisma.systemConfig.upsert({
       where: { id: 'singleton' },
       update: data,
       create: {
@@ -36,14 +33,16 @@ export class SystemConfigService {
         ...data,
       },
     });
+
+    return systemConfig.pixKey
   }
 
-  async getPixKey(): Promise<string> {
+  async getPixKey(): Promise<{pixKey: string}> {
     const config = await this.getConfig();
-    return config.pixKey;
+    return {pixKey: config.pixKey};
   }
 
-  async updatePixKey(pixKey: string): Promise<SystemConfig> {
+  async updatePixKey(pixKey: string): Promise<String> {
     return this.updateConfig({ pixKey });
   }
 }
