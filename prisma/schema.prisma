@@ -44,7 +44,7 @@ model Client {
   billingStartDate  DateTime
   planId            String
 
-  plan              Plan          @relation(fields: [planId], references: [id])
+  plan              Plan          @relation(fields: [planId], references: [id], onDelete: Cascade)
   charges           Charge[]
 }
 
@@ -56,7 +56,7 @@ model Charge {
   status       PaymentStatus
   reminderSent Boolean       @default(false)
 
-  client       Client        @relation(fields: [clientId], references: [id])
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
 }
 
 model SystemConfig {
