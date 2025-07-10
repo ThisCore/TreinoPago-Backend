@@ -56,6 +56,8 @@ export class ChargeService {
   }
 
   async update(id: string, data: UpdateChargeDto): Promise<Charge> {
+    await this.validateCharge(id)
+
     try {
       return await this.prisma.charge.update({
         where: { id },
@@ -74,6 +76,7 @@ export class ChargeService {
   }
 
   async remove(id: string): Promise<Charge> {
+    await this.validateCharge(id)
     try {
       return await this.prisma.charge.delete({
         where: { id },
@@ -168,13 +171,18 @@ export class ChargeService {
   }
 
   async findByClientId(clientId: string): Promise<any[]> {
-  return await this.prisma.charge.findMany({
-    where: {
-      clientId: clientId,
-    },
-    orderBy: {
-      dueDate: 'desc',
-    },
-  });
-}
+    return await this.prisma.charge.findMany({
+      where: {
+        clientId: clientId,
+      },
+      orderBy: {
+        dueDate: 'desc',
+      },
+    });
+  }
+
+  private async validateCharge(id: string) {
+    const chargeExists = await this.prisma.charge.findUnique({where: {id}})
+    if (chargeExists) throw new NotFoundException(`Cliente com id: ${id} não encontrado`)
+  }
 }
