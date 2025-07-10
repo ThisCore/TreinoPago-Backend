@@ -199,6 +199,6 @@ export class ClientService {
 
     private async validateClient(id: string) {
     const clientExists = await this.prisma.client.findUnique({where: {id}})
-    if (clientExists) throw new NotFoundException(`Cliente com id: ${id} não encontrado`)
+    if (!clientExists) throw new NotFoundException(`Cliente com id: ${id} não encontrado`)
   }
 }

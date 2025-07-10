@@ -78,7 +78,7 @@ export class PlanService {
 
   private async validatePlan(id: string) {
     const planExists = await this.prisma.plan.findUnique({where: {id}})
-    if (planExists) throw new NotFoundException(`Plano com id: ${id} não encontrado`)
+    if (!planExists) throw new NotFoundException(`Plano com id: ${id} não encontrado`)
   }
 
   async getClientsCount(id: string): Promise<number> {

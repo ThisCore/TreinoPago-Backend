@@ -185,6 +185,6 @@ export class ChargeService {
 
   private async validateCharge(id: string) {
     const chargeExists = await this.prisma.charge.findUnique({where: {id}})
-    if (chargeExists) throw new NotFoundException(`Cliente com id: ${id} não encontrado`)
+    if (!chargeExists) throw new NotFoundException(`Cobrança com id: ${id} não encontrada`)
   }
 }
