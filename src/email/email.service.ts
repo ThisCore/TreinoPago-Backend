@@ -41,7 +41,7 @@ export class EmailService {
         service: 'gmail',
         auth: {
           user: this.configService.get<string>('EMAIL_USER'),
-          pass: this.configService.get<string>('EMAIL_PASSWORD'), // Use App Password para Gmail
+          pass: this.configService.get<string>('EMAIL_PASSWORD'),
         },
       });
     } else if (emailProvider === 'smtp') {

@@ -9,89 +9,118 @@ import { EmailService } from 'src/email/email.service';
 export class ClientService {
   constructor(private prisma: PrismaService, private emailService: EmailService) {}
 
-  async create(data: CreateClientDto): Promise<Client> {
+ async create(data: CreateClientDto): Promise<Client> {
+  const systemConfig: SystemConfig | null = await this.prisma.systemConfig.findUnique({
+    where: { id: 'singleton' },
+  });
 
-    const systemConfig: SystemConfig | null = await this.prisma.systemConfig.findUnique({
-      where: { id: 'singleton' },
-    });
-
-    if (!systemConfig?.pixKey) {
-      throw new BadRequestException('Chave PIX não configurada no sistema.');
-    }
-
-    const plan = await this.prisma.plan.findUnique({
-      where: {id: data.planId }
-    })
-
-    if (!plan) {
-      throw new BadRequestException('Plano selecionado não foi encontrado no sistema.');
-    }
-
-    const timestamp = Number(data.billingStartDate);
-    const billingStartDate = new Date(timestamp);
-
-    if (isNaN(timestamp) || isNaN(billingStartDate.getTime())) {
-      throw new BadRequestException("Data inválida.");
-    }
-
-    const today = new Date().toISOString().split("T")[0];
-    const start = billingStartDate.toISOString().split("T")[0];
-
-    if (start < today) {
-      throw new BadRequestException("Não é permitido criar com uma data anterior a hoje");
-    }
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const client = await tx.client.create({
-        data: {
-          ...data,
-          billingStartDate
-        },
-        include: {
-          plan: true,
-          charges: true,
-        },
-      });
-
-      const firstCharge = await tx.charge.create({
-        data: {
-          amount: client.plan.price,
-          dueDate: client.billingStartDate,
-          clientId: client.id,
-          reminderSent: false,
-          status: PaymentStatus.PENDING,
-        },
-      });
-
-      return { client, firstCharge };
-    });
-
-    const welcomeEmailData = {
-      to: result.client.email,
-      subject: "Mensagem de boas vindas!",
-      clientName: result.client.name,
-      planName: result.client.plan.name,
-      planPrice: result.client.plan.price,
-      recurrence: result.client.plan.recurrence,
-      pixKey: systemConfig.pixKey,
-      billingStartDate: result.client.billingStartDate,
-    }
-
-    try {
-      await this.emailService.sendWelcomeEmail(welcomeEmailData)
-    } catch (e) {
-      console.log("erro no envio do email de boas vindas: ", e)
-    }
-
-      return {
-              id: result.client.id,
-              name: result.client.name,
-              email: result.client.email,
-              paymentStatus: result.client.paymentStatus,
-              billingStartDate: result.client.billingStartDate,
-              planId: result.client.planId,
-      } as Client;
+  if (!systemConfig?.pixKey) {
+    throw new BadRequestException('Chave PIX não configurada no sistema.');
   }
+
+  const plan = await this.prisma.plan.findUnique({
+    where: {id: data.planId }
+  })
+
+  if (!plan) {
+    throw new BadRequestException('Plano selecionado não foi encontrado no sistema.');
+  }
+
+  const timestamp = Number(data.billingStartDate);
+  const billingStartDate = new Date(timestamp);
+
+  if (isNaN(timestamp) || isNaN(billingStartDate.getTime())) {
+    throw new BadRequestException("Data inválida.");
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+  const start = billingStartDate.toISOString().split("T")[0];
+
+  if (start < today) {
+    throw new BadRequestException("Não é permitido criar com uma data anterior a hoje");
+  }
+
+  const result = await this.prisma.$transaction(async (tx) => {
+    const client = await tx.client.create({
+      data: {
+        ...data,
+        billingStartDate
+      },
+      include: {
+        plan: true,
+        charges: true,
+      },
+    });
+
+    const firstCharge = await tx.charge.create({
+      data: {
+        amount: client.plan.price,
+        dueDate: client.billingStartDate,
+        clientId: client.id,
+        reminderSent: false,
+        status: PaymentStatus.PENDING,
+      },
+    });
+
+    return { client, firstCharge };
+  });
+
+  const welcomeEmailData = {
+    to: result.client.email,
+    subject: "Mensagem de boas vindas!",
+    clientName: result.client.name,
+    planName: result.client.plan.name,
+    planPrice: result.client.plan.price,
+    recurrence: result.client.plan.recurrence,
+    pixKey: systemConfig.pixKey,
+    billingStartDate: result.client.billingStartDate,
+  }
+
+  try {
+    await this.emailService.sendWelcomeEmail(welcomeEmailData)
+  } catch (e) {
+    console.log("erro no envio do email de boas vindas: ", e)
+  }
+
+  const isStartDateToday = start === today;
+  const currentHour = new Date().getHours();
+  const cronHour = 10; 
+
+  if (isStartDateToday && currentHour >= cronHour) {
+    try {
+      const paymentReminderData = {
+        to: result.client.email,
+        subject: "Lembrete de pagamento",
+        clientName: result.client.name,
+        planName: result.client.plan.name,
+        amount: result.client.plan.price,
+        dueDate: result.client.billingStartDate,
+        pixKey: systemConfig.pixKey,
+        chargeId: result.firstCharge.id,
+      };
+
+      await this.emailService.sendChargeReminderEmail(paymentReminderData);
+
+      await this.prisma.charge.update({
+        where: { id: result.firstCharge.id },
+        data: { reminderSent: true },
+      });
+
+      console.log(`Lembrete de pagamento enviado imediatamente para ${result.client.name}`);
+    } catch (error) {
+      console.log("Erro ao enviar lembrete de pagamento imediato:", error);
+    }
+  }
+
+  return {
+    id: result.client.id,
+    name: result.client.name,
+    email: result.client.email,
+    paymentStatus: result.client.paymentStatus,
+    billingStartDate: result.client.billingStartDate,
+    planId: result.client.planId,
+  } as Client;
+}
 
   async findAll(): Promise<Client[]> {
     return this.prisma.client.findMany({

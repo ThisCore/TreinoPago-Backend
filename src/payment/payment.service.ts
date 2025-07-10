@@ -29,7 +29,6 @@ export class PaymentRecurrenceService {
     private readonly emailService: EmailService,
   ) {}
 
-  // Executa todos os dias às 10:00
   @Cron('0 10 * * *', {
     name: 'process-recurring-payments',
     timeZone: 'America/Sao_Paulo',
@@ -38,6 +37,8 @@ export class PaymentRecurrenceService {
     this.logger.log('Iniciando processamento de pagamentos recorrentes...');
 
     try {
+      await this.processFailedChargeReminders();
+      
       const activeClients = await this.getActiveClients();
       
       for (const client of activeClients) {
@@ -47,6 +48,73 @@ export class PaymentRecurrenceService {
       this.logger.log('Processamento de pagamentos recorrentes concluído');
     } catch (error) {
       this.logger.error('Erro no processamento de pagamentos recorrentes:', error);
+    }
+  }
+
+  private async processFailedChargeReminders(): Promise<void> {
+    this.logger.log('Verificando cobranças com lembretes não enviados...');
+
+    const failedCharges = await this.prisma.charge.findMany({
+      where: {
+        reminderSent: false,
+        status: PaymentStatus.PENDING,
+        dueDate: {
+          lte: new Date(), // Apenas cobranças vencidas ou que vencem hoje
+        },
+      },
+      include: {
+        client: {
+          include: {
+            plan: true,
+          },
+        },
+      },
+    });
+
+    for (const charge of failedCharges) {
+      if (charge.client.paymentStatus === PaymentStatus.CANCELED) {
+        this.logger.log(`Pulando cobrança ${charge.id} - cliente cancelado`);
+        continue;
+      }
+
+      await this.retryChargeReminder(charge);
+    }
+
+    this.logger.log(`Processadas ${failedCharges.length} cobranças com lembretes pendentes`);
+  }
+
+  private async retryChargeReminder(charge: Charge & { client: Client & { plan: Plan } }): Promise<void> {
+    try {
+      const systemConfig = await this.prisma.systemConfig.findUnique({
+        where: { id: 'singleton' },
+      });
+
+      if (!systemConfig?.pixKey) {
+        this.logger.error('Chave PIX não configurada no sistema');
+        return;
+      }
+
+      const paymentData: PaymentNotificationData = {
+        clientName: charge.client.name,
+        to: charge.client.email,
+        subject: "Lembrete de pagamento",
+        planName: charge.client.plan.name,
+        amount: charge.amount,
+        dueDate: charge.dueDate,
+        pixKey: systemConfig.pixKey,
+        chargeId: charge.id,
+      };
+
+      await this.emailService.sendChargeReminderEmail(paymentData);
+
+      await this.prisma.charge.update({
+        where: { id: charge.id },
+        data: { reminderSent: true },
+      });
+
+      this.logger.log(`Lembrete reenviado para cobrança ${charge.id} - Cliente: ${charge.client.name}`);
+    } catch (error) {
+      this.logger.error(`Erro ao reenviar lembrete para cobrança ${charge.id}:`, error);
     }
   }
 
@@ -75,6 +143,7 @@ export class PaymentRecurrenceService {
     if (!this.shouldCreateCharge(nextDueDate)) {
       return;
     }
+    
     const existingCharge = await this.prisma.charge.findFirst({
       where: {
         clientId: client.id,
@@ -145,33 +214,39 @@ export class PaymentRecurrenceService {
         return;
       }
 
-      // Cria a cobrança
-      const charge: Charge = await this.prisma.charge.create({
-        data: {
-          clientId: client.id,
-          dueDate,
+      await this.prisma.$transaction(async (prisma) => {
+        const charge = await prisma.charge.create({
+          data: {
+            clientId: client.id,
+            dueDate,
+            amount: client.plan.price,
+            status: PaymentStatus.PENDING,
+            reminderSent: false,
+          },
+        });
+
+        const paymentData: PaymentNotificationData = {
+          clientName: client.name,
+          to: client.email,
+          subject: "Lembrete de pagamento",
+          planName: client.plan.name,
           amount: client.plan.price,
-          status: PaymentStatus.PENDING,
-          reminderSent: false,
-        },
-      });
+          dueDate,
+          pixKey: systemConfig.pixKey,
+          chargeId: charge.id,
+        };
 
-      const paymentData: PaymentNotificationData = {
-        clientName: client.name,
-        to: client.email,
-        subject: "Lembrete de pagamento",
-        planName: client.plan.name,
-        amount: client.plan.price,
-        dueDate,
-        pixKey: systemConfig.pixKey,
-        chargeId: charge.id,
-      };
+        try {
+          await this.emailService.sendChargeReminderEmail(paymentData);
 
-      await this.emailService.sendChargeReminderEmail(paymentData);
-
-      await this.prisma.charge.update({
-        where: { id: charge.id },
-        data: { reminderSent: true },
+          await prisma.charge.update({
+            where: { id: charge.id },
+            data: { reminderSent: true },
+          });
+        } catch (error) {
+          this.logger.error(`Erro ao enviar email para cobrança ${charge.id}:`, error);
+          throw error; 
+        }
       });
 
       this.logger.log(`Cobrança criada e email enviado para ${client.name} - Valor: R$ ${client.plan.price}`);
@@ -207,5 +282,10 @@ export class PaymentRecurrenceService {
 
     await this.processClientPayment(client);
     this.logger.log(`Processamento manual concluído para cliente ${client.name}`);
+  }
+
+  async retryFailedChargeReminders(): Promise<void> {
+    this.logger.log('Reprocessando apenas cobranças com lembretes falhados...');
+    await this.processFailedChargeReminders();
   }
 }
