@@ -27,14 +27,18 @@ export class ClientService {
       throw new BadRequestException('Plano selecionado não foi encontrado no sistema.');
     }
 
-    const billingStartDate = new Date(data.billingStartDate)
-    const  todayDate = new Date()
+    const timestamp = Number(data.billingStartDate);
+    const billingStartDate = new Date(timestamp);
 
-    const today = todayDate.toISOString().split("T")[0]
-    const start = billingStartDate.toISOString().split("T")[0]
+    if (isNaN(timestamp) || isNaN(billingStartDate.getTime())) {
+      throw new BadRequestException("Data inválida.");
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const start = billingStartDate.toISOString().split("T")[0];
 
     if (start < today) {
-      throw new BadRequestException("Não é permitido criar com uma data anterior a hoje")
+      throw new BadRequestException("Não é permitido criar com uma data anterior a hoje");
     }
 
     const result = await this.prisma.$transaction(async (tx) => {

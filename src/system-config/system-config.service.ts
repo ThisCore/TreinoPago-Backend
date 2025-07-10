@@ -24,7 +24,7 @@ export class SystemConfigService {
     return config;
   }
 
-  async updateConfig(data: UpdateSystemConfigDto): Promise<String> {
+  async updateConfig(data: UpdateSystemConfigDto) {
     const systemConfig = await this.prisma.systemConfig.upsert({
       where: { id: 'singleton' },
       update: data,
@@ -34,7 +34,7 @@ export class SystemConfigService {
       },
     });
 
-    return systemConfig.pixKey
+    return {pixKey: systemConfig.pixKey}
   }
 
   async getPixKey(): Promise<{pixKey: string}> {
@@ -42,7 +42,7 @@ export class SystemConfigService {
     return {pixKey: config.pixKey};
   }
 
-  async updatePixKey(pixKey: string): Promise<String> {
+  async updatePixKey(pixKey: string) {
     return this.updateConfig({ pixKey });
   }
 }

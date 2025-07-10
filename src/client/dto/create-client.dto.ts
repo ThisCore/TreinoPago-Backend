@@ -19,7 +19,7 @@ export class CreateClientDto {
   @IsEnum(PaymentStatus)
   paymentStatus: PaymentStatus;
 
-  @ApiProperty({ example: 1000000, description: 'Data de início da cobrança em milisegundos' })
+  @ApiProperty({ example: 1930677600000, description: 'Data de início da cobrança em milisegundos' })
   @IsNumber()
   billingStartDate: number;
 }
