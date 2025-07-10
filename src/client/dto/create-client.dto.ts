@@ -1,5 +1,5 @@
 import { PaymentStatus } from '@prisma/client';
-import { IsEmail, IsEnum, IsISO8601, IsString, IsUUID } from 'class-validator';
+import { IsEmail, IsEnum, IsISO8601, IsNumber, IsString, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateClientDto {
@@ -19,7 +19,7 @@ export class CreateClientDto {
   @IsEnum(PaymentStatus)
   paymentStatus: PaymentStatus;
 
-  @ApiProperty({ example: '2025-06-01T00:00:00.000Z', description: 'Data de início da cobrança (formato ISO 8601)' })
-  @IsISO8601()
-  billingStartDate: string;
+  @ApiProperty({ example: 1000000, description: 'Data de início da cobrança em milisegundos' })
+  @IsNumber()
+  billingStartDate: number;
 }

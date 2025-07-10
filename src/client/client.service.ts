@@ -27,9 +27,22 @@ export class ClientService {
       throw new BadRequestException('Plano selecionado não foi encontrado no sistema.');
     }
 
+    const billingStartDate = new Date(data.billingStartDate)
+    const  todayDate = new Date()
+
+    const today = todayDate.toISOString().split("T")[0]
+    const start = billingStartDate.toISOString().split("T")[0]
+
+    if (start < today) {
+      throw new BadRequestException("Não é permitido criar com uma data anterior a hoje")
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       const client = await tx.client.create({
-        data,
+        data: {
+          ...data,
+          billingStartDate
+        },
         include: {
           plan: true,
           charges: true,
@@ -120,10 +133,25 @@ export class ClientService {
   }
 
   async update(id: string, data: UpdateClientDto): Promise<Client> {
+    await this.validateClient(id)
+
+    const billingStartDate = new Date(data.billingStartDate)
+    const  todayDate = new Date()
+
+    const today = todayDate.toISOString().split("T")[0]
+    const start = billingStartDate.toISOString().split("T")[0]
+    
+    if (start < today) {
+      throw new BadRequestException("Não é permitido criar com uma data anterior a hoje")
+    }
+
     try {
       return await this.prisma.client.update({
         where: { id },
-        data,
+        data: {
+          ...data,
+          billingStartDate
+        },
         include: {
           plan: true,
           charges: true,
@@ -135,6 +163,7 @@ export class ClientService {
   }
 
   async remove(id: string): Promise<Client> {
+    await this.validateClient(id)
     try {
       return await this.prisma.client.delete({
         where: { id },
@@ -162,5 +191,10 @@ export class ClientService {
         charges: true,
       },
     });
+  }
+
+    private async validateClient(id: string) {
+    const clientExists = await this.prisma.client.findUnique({where: {id}})
+    if (clientExists) throw new NotFoundException(`Cliente com id: ${id} não encontrado`)
   }
 }
