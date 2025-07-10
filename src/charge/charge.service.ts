@@ -21,19 +21,37 @@ export class ChargeService {
     });
   }
 
-  async findAll(): Promise<Charge[]> {
-    return this.prisma.charge.findMany({
-      include: {
-        client: {
-          include: {
-            plan: true,
+  async findAll() {
+    const [sent, notSent] = await Promise.all([
+      this.prisma.charge.findMany({
+        where: { reminderSent: true },
+        include: {
+          client: {
+            include: {
+              plan: true,
+            },
           },
         },
-      },
-      orderBy: {
-        dueDate: 'desc',
-      },
-    });
+        orderBy: {
+          dueDate: 'desc',
+        },
+      }),
+      this.prisma.charge.findMany({
+        where: { reminderSent: false },
+        include: {
+          client: {
+            include: {
+              plan: true,
+            },
+          },
+        },
+        orderBy: {
+          dueDate: 'desc',
+        },
+      }),
+    ]);
+
+    return { sent, notSent };
   }
 
   async findOne(id: string): Promise<Charge> {
