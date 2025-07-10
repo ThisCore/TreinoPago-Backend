@@ -22,9 +22,7 @@ export class ChargeService {
   }
 
   async findAll() {
-    const [sent, notSent] = await Promise.all([
-      this.prisma.charge.findMany({
-        where: { reminderSent: true },
+    const charges =  await this.prisma.charge.findMany({
         include: {
           client: {
             include: {
@@ -35,23 +33,9 @@ export class ChargeService {
         orderBy: {
           dueDate: 'desc',
         },
-      }),
-      this.prisma.charge.findMany({
-        where: { reminderSent: false },
-        include: {
-          client: {
-            include: {
-              plan: true,
-            },
-          },
-        },
-        orderBy: {
-          dueDate: 'desc',
-        },
-      }),
-    ]);
+      })
 
-    return { sent, notSent };
+    return charges
   }
 
   async findOne(id: string): Promise<Charge> {

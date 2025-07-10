@@ -1,20 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron,  } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { PaymentStatus, Recurrence, Client, Plan, Charge, SystemConfig } from '@prisma/client';
 import { EmailService } from 'src/email/email.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 
-// Tipos para os dados do cliente com relacionamentos
 type ClientWithPlanAndCharges = Client & {
   plan: Plan;
   charges: Charge[];
 };
 
-type ClientWithPlan = Client & {
-  plan: Plan;
-};
-
-// Interface para os dados de notificação de pagamento
 interface PaymentNotificationData {
   to: string;
   subject: string;
@@ -35,8 +29,8 @@ export class PaymentRecurrenceService {
     private readonly emailService: EmailService,
   ) {}
 
-  // Executa todos os dias às 09:00
-  @Cron('0 9 * * *', {
+  // Executa todos os dias às 10:00
+  @Cron('0 10 * * *', {
     name: 'process-recurring-payments',
     timeZone: 'America/Sao_Paulo',
   })
