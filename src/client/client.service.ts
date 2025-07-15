@@ -4,10 +4,15 @@ import { UpdateClientDto } from './dto/update-client.dto';
 import { Client, PaymentStatus, SystemConfig } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { EmailService } from 'src/email/email.service';
+import { PaymentRecurrenceService } from 'src/payment/payment.service';
 
 @Injectable()
 export class ClientService {
-  constructor(private prisma: PrismaService, private emailService: EmailService) {}
+  constructor(
+    private prisma: PrismaService, 
+    private emailService: EmailService,
+    private paymentService: PaymentRecurrenceService
+  ) {}
 
  async create(data: CreateClientDto): Promise<Client> {
   const systemConfig: SystemConfig | null = await this.prisma.systemConfig.findUnique({
@@ -87,29 +92,7 @@ export class ClientService {
   const cronHour = 10; 
 
   if (isStartDateToday && currentHour >= cronHour) {
-    try {
-      const paymentReminderData = {
-        to: result.client.email,
-        subject: "Lembrete de pagamento",
-        clientName: result.client.name,
-        planName: result.client.plan.name,
-        amount: result.client.plan.price,
-        dueDate: result.client.billingStartDate,
-        pixKey: systemConfig.pixKey,
-        chargeId: result.firstCharge.id,
-      };
-
-      await this.emailService.sendChargeReminderEmail(paymentReminderData);
-
-      await this.prisma.charge.update({
-        where: { id: result.firstCharge.id },
-        data: { reminderSent: true },
-      });
-
-      console.log(`Lembrete de pagamento enviado imediatamente para ${result.client.name}`);
-    } catch (error) {
-      console.log("Erro ao enviar lembrete de pagamento imediato:", error);
-    }
+    await this.paymentService.sendPaymentEmailAndCreateNext(result.client, billingStartDate, result.firstCharge.id)
   }
 
   return {

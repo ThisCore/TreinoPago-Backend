@@ -4,9 +4,8 @@ import { PaymentStatus, Recurrence, Client, Plan, Charge, SystemConfig } from '@
 import { EmailService } from 'src/email/email.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 
-type ClientWithPlanAndCharges = Client & {
+type ClientWithPlan = Client & {
   plan: Plan;
-  charges: Charge[];
 };
 
 interface PaymentNotificationData {
@@ -34,33 +33,33 @@ export class PaymentRecurrenceService {
     timeZone: 'America/Sao_Paulo',
   })
   async processRecurringPayments(): Promise<void> {
-    this.logger.log('Iniciando processamento de pagamentos recorrentes...');
+    this.logger.log('Verificando cobranças que vencem HOJE...');
 
     try {
-      await this.processFailedChargeReminders();
-      
-      const activeClients = await this.getActiveClients();
-      
-      for (const client of activeClients) {
-        await this.processClientPayment(client);
-      }
+      await this.processChargesDueToday();
 
-      this.logger.log('Processamento de pagamentos recorrentes concluído');
+      this.logger.log('Processamento concluído');
     } catch (error) {
-      this.logger.error('Erro no processamento de pagamentos recorrentes:', error);
+      this.logger.error('Erro no processamento:', error);
     }
   }
 
-  private async processFailedChargeReminders(): Promise<void> {
-    this.logger.log('Verificando cobranças com lembretes não enviados...');
+  private async processChargesDueToday(): Promise<void> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const failedCharges = await this.prisma.charge.findMany({
+    // Busca cobranças que vencem HOJE e ainda não enviaram email
+    const chargesDueToday = await this.prisma.charge.findMany({
       where: {
-        reminderSent: false,
-        status: PaymentStatus.PENDING,
         dueDate: {
-          lte: new Date(), // Apenas cobranças vencidas ou que vencem hoje
+          gte: today,
+          lt: tomorrow,
         },
+        status: PaymentStatus.PENDING,
+        reminderSent: false,
       },
       include: {
         client: {
@@ -71,19 +70,30 @@ export class PaymentRecurrenceService {
       },
     });
 
-    for (const charge of failedCharges) {
+    this.logger.log(`Encontradas ${chargesDueToday.length} cobranças que vencem hoje`);
+
+    for (const charge of chargesDueToday) {
       if (charge.client.paymentStatus === PaymentStatus.CANCELED) {
         this.logger.log(`Pulando cobrança ${charge.id} - cliente cancelado`);
         continue;
       }
 
-      await this.retryChargeReminder(charge);
+      // Envia email e cria próxima cobrança
+      await this.sendPaymentEmailAndCreateNext(charge.client, charge.dueDate, charge.id);
     }
-
-    this.logger.log(`Processadas ${failedCharges.length} cobranças com lembretes pendentes`);
   }
 
-  private async retryChargeReminder(charge: Charge & { client: Client & { plan: Plan } }): Promise<void> {
+  /**
+   * Função principal: Envia email de cobrança e cria a próxima charge
+   * @param client Cliente com plano
+   * @param dueDate Data de vencimento da cobrança atual
+   * @param chargeId ID da cobrança atual (opcional, para casos onde já existe)
+   */
+  public async sendPaymentEmailAndCreateNext(
+    client: ClientWithPlan, 
+    dueDate: Date, 
+    chargeId?: string
+  ): Promise<void> {
     try {
       const systemConfig = await this.prisma.systemConfig.findUnique({
         where: { id: 'singleton' },
@@ -94,79 +104,95 @@ export class PaymentRecurrenceService {
         return;
       }
 
+      // Se não foi passado chargeId, busca a cobrança para essa data
+      let currentChargeId = chargeId;
+      if (!currentChargeId) {
+        const existingCharge = await this.prisma.charge.findFirst({
+          where: {
+            clientId: client.id,
+            dueDate: {
+              gte: new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()),
+              lt: new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate() + 1),
+            },
+          },
+        });
+        
+        if (!existingCharge) {
+          this.logger.error(`Cobrança não encontrada para cliente ${client.name} na data ${dueDate.toLocaleDateString('pt-BR')}`);
+          return;
+        }
+        
+        currentChargeId = existingCharge.id;
+      }
+
+      // Prepara dados do email
       const paymentData: PaymentNotificationData = {
-        clientName: charge.client.name,
-        to: charge.client.email,
-        subject: "Lembrete de pagamento",
-        planName: charge.client.plan.name,
-        amount: charge.amount,
-        dueDate: charge.dueDate,
+        clientName: client.name,
+        to: client.email,
+        subject: "🔔 Pagamento vence HOJE!",
+        planName: client.plan.name,
+        amount: client.plan.price,
+        dueDate: dueDate,
         pixKey: systemConfig.pixKey,
-        chargeId: charge.id,
+        chargeId: currentChargeId,
       };
 
+      // Envia email
       await this.emailService.sendChargeReminderEmail(paymentData);
 
+      // Marca como enviado
       await this.prisma.charge.update({
-        where: { id: charge.id },
+        where: { id: currentChargeId },
         data: { reminderSent: true },
       });
 
-      this.logger.log(`Lembrete reenviado para cobrança ${charge.id} - Cliente: ${charge.client.name}`);
+      this.logger.log(`✅ Email enviado para ${client.name} - Cobrança vence HOJE (${dueDate.toLocaleDateString('pt-BR')})`);
+
+      // Cria próxima cobrança
+      await this.createNextCharge(client, dueDate);
+
     } catch (error) {
-      this.logger.error(`Erro ao reenviar lembrete para cobrança ${charge.id}:`, error);
+      this.logger.error(`Erro ao processar pagamento para cliente ${client.name}:`, error);
     }
   }
 
-  private async getActiveClients(): Promise<ClientWithPlanAndCharges[]> {
-    return this.prisma.client.findMany({
-      where: {
-        paymentStatus: {
-          not: PaymentStatus.CANCELED,
-        },
-      },
-      include: {
-        plan: true,
-        charges: {
-          orderBy: {
-            dueDate: 'desc',
+  private async createNextCharge(client: ClientWithPlan, currentDueDate: Date): Promise<void> {
+    try {
+      // Calcula próxima data baseada na recorrência
+      const nextDueDate = this.addRecurrencePeriod(currentDueDate, client.plan.recurrence);
+      
+      // Verifica se já existe cobrança para a próxima data
+      const existingNextCharge = await this.prisma.charge.findFirst({
+        where: {
+          clientId: client.id,
+          dueDate: {
+            gte: new Date(nextDueDate.getFullYear(), nextDueDate.getMonth(), nextDueDate.getDate()),
+            lt: new Date(nextDueDate.getFullYear(), nextDueDate.getMonth(), nextDueDate.getDate() + 1),
           },
-          take: 1,
         },
-      },
-    });
-  }
+      });
 
-  private async processClientPayment(client: ClientWithPlanAndCharges): Promise<void> {
-    const nextDueDate = this.calculateNextDueDate(client);
-    
-    if (!this.shouldCreateCharge(nextDueDate)) {
-      return;
-    }
-    
-    const existingCharge = await this.prisma.charge.findFirst({
-      where: {
-        clientId: client.id,
-        dueDate: {
-          gte: new Date(nextDueDate.getFullYear(), nextDueDate.getMonth(), nextDueDate.getDate()),
-          lt: new Date(nextDueDate.getFullYear(), nextDueDate.getMonth(), nextDueDate.getDate() + 1),
+      if (existingNextCharge) {
+        this.logger.log(`Próxima cobrança já existe para ${client.name} - Data: ${nextDueDate.toLocaleDateString('pt-BR')}`);
+        return;
+      }
+
+      // Cria próxima cobrança
+      const nextCharge = await this.prisma.charge.create({
+        data: {
+          clientId: client.id,
+          dueDate: nextDueDate,
+          amount: client.plan.price,
+          status: PaymentStatus.PENDING,
+          reminderSent: false,
         },
-      },
-    });
+      });
 
-    if (existingCharge) {
-      this.logger.log(`Cobrança já existe para cliente ${client.name} na data ${nextDueDate.toISOString()}`);
-      return;
+      this.logger.log(`📅 Próxima cobrança criada para ${client.name} - ID: ${nextCharge.id} - Vencimento: ${nextDueDate.toLocaleDateString('pt-BR')}`);
+
+    } catch (error) {
+      this.logger.error(`Erro ao criar próxima cobrança para ${client.name}:`, error);
     }
-
-    await this.createChargeAndSendEmail(client, nextDueDate);
-  }
-
-  private calculateNextDueDate(client: ClientWithPlanAndCharges): Date {
-    const lastCharge = client.charges[0];
-    const baseDate = lastCharge ? new Date(lastCharge.dueDate) : new Date(client.billingStartDate);
-    
-    return this.addRecurrencePeriod(baseDate, client.plan.recurrence);
   }
 
   private addRecurrencePeriod(date: Date, recurrence: Recurrence): Date {
@@ -193,83 +219,15 @@ export class PaymentRecurrenceService {
     return newDate;
   }
 
-  private shouldCreateCharge(dueDate: Date): boolean {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    // Cria cobrança se a data de vencimento é hoje ou amanhã
-    return dueDate <= tomorrow;
-  }
-
-  private async createChargeAndSendEmail(client: ClientWithPlanAndCharges, dueDate: Date): Promise<void> {
-    try {
-      // Busca a chave PIX do sistema
-      const systemConfig: SystemConfig | null = await this.prisma.systemConfig.findUnique({
-        where: { id: 'singleton' },
-      });
-
-      if (!systemConfig?.pixKey) {
-        this.logger.error('Chave PIX não configurada no sistema');
-        return;
-      }
-
-      await this.prisma.$transaction(async (prisma) => {
-        const charge = await prisma.charge.create({
-          data: {
-            clientId: client.id,
-            dueDate,
-            amount: client.plan.price,
-            status: PaymentStatus.PENDING,
-            reminderSent: false,
-          },
-        });
-
-        const paymentData: PaymentNotificationData = {
-          clientName: client.name,
-          to: client.email,
-          subject: "Lembrete de pagamento",
-          planName: client.plan.name,
-          amount: client.plan.price,
-          dueDate,
-          pixKey: systemConfig.pixKey,
-          chargeId: charge.id,
-        };
-
-        try {
-          await this.emailService.sendChargeReminderEmail(paymentData);
-
-          await prisma.charge.update({
-            where: { id: charge.id },
-            data: { reminderSent: true },
-          });
-        } catch (error) {
-          this.logger.error(`Erro ao enviar email para cobrança ${charge.id}:`, error);
-          throw error; 
-        }
-      });
-
-      this.logger.log(`Cobrança criada e email enviado para ${client.name} - Valor: R$ ${client.plan.price}`);
-    } catch (error) {
-      this.logger.error(`Erro ao processar pagamento para cliente ${client.name}:`, error);
-    }
-  }
-
-  async processPaymentsManually(): Promise<void> {
-    this.logger.log('Executando processamento manual de pagamentos...');
-    await this.processRecurringPayments();
-  }
-
-  async processSpecificClient(clientId: string): Promise<void> {
-    const client: ClientWithPlanAndCharges | null = await this.prisma.client.findUnique({
+  /**
+   * Função utilitária: Envia email para uma data específica
+   * @param clientId ID do cliente
+   * @param dueDate Data de vencimento
+   */
+  public async sendPaymentEmailForDate(clientId: string, dueDate: Date): Promise<void> {
+    const client = await this.prisma.client.findUnique({
       where: { id: clientId },
-      include: {
-        plan: true,
-        charges: {
-          orderBy: { dueDate: 'desc' },
-          take: 1,
-        },
-      },
+      include: { plan: true },
     });
 
     if (!client) {
@@ -280,12 +238,84 @@ export class PaymentRecurrenceService {
       throw new Error(`Cliente ${client.name} está cancelado`);
     }
 
-    await this.processClientPayment(client);
-    this.logger.log(`Processamento manual concluído para cliente ${client.name}`);
+    await this.sendPaymentEmailAndCreateNext(client, dueDate);
+  }
+
+  /**
+   * Função utilitária: Cria cobrança para uma data específica (sem enviar email)
+   * @param clientId ID do cliente
+   * @param dueDate Data de vencimento
+   */
+  public async createChargeForDate(clientId: string, dueDate: Date): Promise<Charge> {
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      include: { plan: true },
+    });
+
+    if (!client) {
+      throw new Error(`Cliente com ID ${clientId} não encontrado`);
+    }
+
+    const charge = await this.prisma.charge.create({
+      data: {
+        clientId: client.id,
+        dueDate,
+        amount: client.plan.price,
+        status: PaymentStatus.PENDING,
+        reminderSent: false,
+      },
+    });
+
+    this.logger.log(`💳 Cobrança criada para ${client.name} - ID: ${charge.id} - Vencimento: ${dueDate.toLocaleDateString('pt-BR')}`);
+    return charge;
+  }
+
+  // Métodos utilitários para execução manual
+  async processPaymentsManually(): Promise<void> {
+    this.logger.log('🔧 Executando processamento manual...');
+    await this.processRecurringPayments();
+  }
+
+  async processSpecificClient(clientId: string): Promise<void> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Busca cobrança do cliente para hoje
+    const charge = await this.prisma.charge.findFirst({
+      where: {
+        clientId,
+        dueDate: {
+          gte: today,
+          lt: tomorrow,
+        },
+        status: PaymentStatus.PENDING,
+      },
+      include: {
+        client: {
+          include: {
+            plan: true,
+          },
+        },
+      },
+    });
+
+    if (!charge) {
+      throw new Error(`Nenhuma cobrança encontrada para hoje para o cliente ${clientId}`);
+    }
+
+    if (charge.client.paymentStatus === PaymentStatus.CANCELED) {
+      throw new Error(`Cliente ${charge.client.name} está cancelado`);
+    }
+
+    await this.sendPaymentEmailAndCreateNext(charge.client, charge.dueDate, charge.id);
+    this.logger.log(`Processamento manual concluído para cliente ${charge.client.name}`);
   }
 
   async retryFailedChargeReminders(): Promise<void> {
-    this.logger.log('Reprocessando apenas cobranças com lembretes falhados...');
-    await this.processFailedChargeReminders();
+    this.logger.log('🔄 Reprocessando cobranças com lembretes falhados...');
+    await this.processChargesDueToday();
   }
 }
