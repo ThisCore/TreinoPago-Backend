@@ -21,5 +21,5 @@ export class CreateClientDto {
 
   @ApiProperty({ example: 1930677600000, description: 'Data de início da cobrança em milisegundos' })
   @IsNumber()
-  billingStartDate: number;
+  startDate: number;
 }

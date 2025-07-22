@@ -311,8 +311,8 @@ Esta é uma mensagem automática, não responda este email.
     }).format(data.dueDate);
 
     const isOverdue = new Date() > data.dueDate;
-    const statusText = isOverdue ? '⚠️ VENCIDO' : '📅 VENCE EM BREVE';
-    const statusColor = isOverdue ? '#dc3545' : '#ffc107';
+    const statusText = isOverdue ? 'LEMBRETE DE PAGAMENTO' : '📅 VENCE EM BREVE';
+    const statusColor = '#007bff'
 
     return `
     <!DOCTYPE html>
@@ -341,7 +341,7 @@ Esta é uma mensagem automática, não responda este email.
                 <p>Olá, <strong>${data.clientName}</strong>!</p>
                 
                 <p>${isOverdue 
-                  ? 'Sua cobrança está vencida e precisa ser paga o quanto antes.' 
+                  ? 'Faça o seu pagamento hoje.' 
                   : 'Sua cobrança vence em breve. Não se esqueça de realizar o pagamento!'
                 }</p>
                 
@@ -400,7 +400,7 @@ Esta é uma mensagem automática, não responda este email.
     }).format(data.dueDate);
 
     const isOverdue = new Date() > data.dueDate;
-    const statusText = isOverdue ? '⚠️ VENCIDO' : '📅 VENCE EM BREVE';
+    const statusText = isOverdue ? 'LEMBRETE DE PAGAMENTO' : '📅 VENCE EM BREVE';
 
     return `
 ${statusText}
@@ -408,7 +408,7 @@ ${statusText}
 Olá, ${data.clientName}!
 
 ${isOverdue 
-  ? 'Sua cobrança está vencida e precisa ser paga o quanto antes.' 
+  ? 'Faça o seu pagamento hoje.' 
   : 'Sua cobrança vence em breve. Não se esqueça de realizar o pagamento!'
 }
 

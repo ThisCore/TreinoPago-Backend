@@ -6,6 +6,12 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { EmailService } from 'src/email/email.service';
 import { PaymentRecurrenceService } from 'src/payment/payment.service';
 
+function convertToUTCFromSaoPaulo(date: Date | string | number): Date {
+  const d = new Date(date);
+  const offset = +3; // Horário padrão de Brasília (sem considerar horário de verão)
+  return new Date(d.getTime() - offset * 60 * 60 * 1000);
+}
+
 @Injectable()
 export class ClientService {
   constructor(
@@ -31,25 +37,29 @@ export class ClientService {
     throw new BadRequestException('Plano selecionado não foi encontrado no sistema.');
   }
 
-  const timestamp = Number(data.billingStartDate);
+  const billingStartDateInUTC = convertToUTCFromSaoPaulo(data.startDate);
+  const timestamp = Number(data.startDate);
   const billingStartDate = new Date(timestamp);
+
+  const today = new Date().toISOString().split("T")[0];
+  const start = billingStartDate.toISOString().split("T")[0];
 
   if (isNaN(timestamp) || isNaN(billingStartDate.getTime())) {
     throw new BadRequestException("Data inválida.");
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  const start = billingStartDate.toISOString().split("T")[0];
-
   if (start < today) {
     throw new BadRequestException("Não é permitido criar com uma data anterior a hoje");
   }
 
+  const {startDate, ...createClient} = data
+
   const result = await this.prisma.$transaction(async (tx) => {
     const client = await tx.client.create({
       data: {
-        ...data,
-        billingStartDate
+        ...createClient,
+        billingStartDate: billingStartDateInUTC,
+        paymentStatus: 'PENDING'
       },
       include: {
         plan: true,
@@ -92,7 +102,7 @@ export class ClientService {
   const cronHour = 10; 
 
   if (isStartDateToday && currentHour >= cronHour) {
-    await this.paymentService.sendPaymentEmailAndCreateNext(result.client, billingStartDate, result.firstCharge.id)
+    await this.paymentService.sendPaymentEmailAndCreateNext(result.client, result.client.billingStartDate, result.firstCharge.id)
   }
 
   return {
@@ -151,7 +161,7 @@ export class ClientService {
   async update(id: string, data: UpdateClientDto): Promise<Client> {
     await this.validateClient(id)
 
-    const billingStartDate = new Date(data.billingStartDate)
+    const billingStartDate = new Date(data.startDate)
     const  todayDate = new Date()
 
     const today = todayDate.toISOString().split("T")[0]
