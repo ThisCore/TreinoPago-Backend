@@ -161,22 +161,22 @@ export class ClientService {
   async update(id: string, data: UpdateClientDto): Promise<Client> {
     await this.validateClient(id)
 
-    const billingStartDate = new Date(data.startDate)
-    const  todayDate = new Date()
+    // const billingStartDate = new Date(data.startDate)
+    // const  todayDate = new Date()
 
-    const today = todayDate.toISOString().split("T")[0]
-    const start = billingStartDate.toISOString().split("T")[0]
+    // const today = todayDate.toISOString().split("T")[0]
+    // const start = billingStartDate.toISOString().split("T")[0]
     
-    if (start < today) {
-      throw new BadRequestException("Não é permitido criar com uma data anterior a hoje")
-    }
+    // if (start < today) {
+    //   throw new BadRequestException("Não é permitido criar com uma data anterior a hoje")
+    // }
 
     try {
       return await this.prisma.client.update({
         where: { id },
         data: {
           ...data,
-          billingStartDate
+          // billingStartDate
         },
         include: {
           plan: true,
